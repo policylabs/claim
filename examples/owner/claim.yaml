@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: Copyright 2026 The Policy Labs Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example owner document, served at https://example.com/.well-known/claim.yaml
+# (host scheme) or committed to a repository referenced by a git+https locator
+# (file scheme).
+#
+# claim only reads the context values the repository policy leaves open and
+# the rule allows (see ownerContext). Anything else here is ignored.
+version: 1
+
+# Values that apply to every repository and path this document owns.
+context:
+  signers:
+    - alice@example.com
+    - bob@example.com
+
+# Per owned path (as the receiving repository names it) overrides.
+paths:
+  data/example.com/:
+    context:
+      signers:
+        - alice@example.com
+
+# Per receiving repository overrides, optionally per path. Most specific wins:
+# repositories.<repo>.paths > repositories.<repo> > paths > context.
+repositories:
+  github.com/some-org/registry:
+    context:
+      signers:
+        - registry-bot@example.com
+    paths:
+      data/example.com/:
+        context:
+          signers:
+            - alice@example.com
+            - registry-bot@example.com

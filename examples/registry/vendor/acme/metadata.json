@@ -1,0 +1,6 @@
+{
+  "name": "acme",
+  "maintainers": {
+    "claim": "git+https://github.com/acme/owners@main#claim.yaml"
+  }
+}
