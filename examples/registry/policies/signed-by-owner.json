@@ -1,0 +1,31 @@
+{
+  "id": "signed-by-owner",
+  "meta": {
+    "name": "Commit signed by a path owner",
+    "description": "Passes when the pull request head commit carries a verified gitsign (sigstore) signature whose identity is one the path owner lists in the signers context value."
+  },
+  "context": {
+    "signers": {
+      "required": true,
+      "description": "Sigstore identities (emails) allowed to sign changes under this path. Supplied by the path owner through claim."
+    },
+    "issuer": {
+      "default": "https://github.com/login/oauth",
+      "description": "OIDC issuer the signer identity must come from. Owned by the repository; owners cannot change it unless ownerContext lists it."
+    }
+  },
+  "predicates": {
+    "types": ["https://gitsign.sigstore.dev/predicate/git/v0.1"]
+  },
+  "tenets": [
+    {
+      "id": "signed-by-allowed-identity",
+      "code": "predicates.exists(p, p.verification.verified && p.verification.signers.exists(s, has(s.sigstore) && s.sigstore.issuer == context.issuer && s.sigstore.identity in context.signers))",
+      "assessment": {"message": "The commit is signed by an identity the path owner accepts"},
+      "error": {
+        "message": "The commit is not signed by an identity the path owner accepts",
+        "guidance": "Sign the head commit with gitsign using one of the identities the path owner lists in its claim document."
+      }
+    }
+  ]
+}

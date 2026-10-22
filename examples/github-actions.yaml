@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright 2026 The Policy Labs Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example GitHub Actions workflow running claim on pull requests.
+name: claim
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Check out the PR head commit, not the synthetic merge commit: the
+          # head commit is what the author signed.
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Full history so the merge base with the target branch resolves.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+
+      - run: go install github.com/policylabs/claim/cmd/claim@latest
+
+      - env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch origin "$BASE_REF"
+          claim check --base "origin/$BASE_REF" --head "$HEAD_SHA"

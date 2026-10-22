@@ -292,3 +292,88 @@ passing check must not ride the earlier result. The results-store design in
    allowlisted context values.
 3. Write the commit-signature and git-notes collector.
 4. Add the results store and the PR status computation.
+
+## 7. Implementation status
+
+This section tracks how the code in this repository maps to the design above.
+It is updated with the code.
+
+### 7.1 Decisions taken by the implementation
+
+These were marked **Open** above; the implementation picks a default so the
+tool can run. Each is a proposal, revisit as needed.
+
+| open item | decision in code |
+|---|---|
+| config file name and schema (§2.1, Q3) | `.claim.yaml` at the repository root, `version: 1`. Ordered `rules`, each with `path` (prefix), `depth` (segments forming one owned unit), `policy`, `owner`, `ownerContext`, `onMissingOwner`, extra `collectors`. Repository-wide `unmatched: deny\|allow`. See `pkg/config`. |
+| matching (§2.1) | First matching rule in order (rules are an ordered list, so "longest prefix" is whatever order the repository writes). Depth makes the owned unit explicit instead of inferring it. |
+| well-known path (§2.3.1, Q2) | `https://<host>/.well-known/claim.yaml`, overridable per rule with `owner.wellKnown`. |
+| owner reference schemes (§2.3) | `host` (derive from the segment) and `file` (JSON/YAML + RFC 6901 pointer, or a text file with the bare URL) resolve to `https://` or `git+https://` owner URLs. `git+https://` is implemented through the SPDX VCS locator library already used by AMPEL. `none` marks paths with no remote owner. No `navajo` resolver yet (Q1). |
+| owner document format (§2.4, Q4) | YAML/JSON, `version: 1`, a `context` map, plus `paths` and `repositories[...].paths` scopes so one document can serve several repositories and paths. Most specific scope wins. No TTL yet (there is no results store to expire). No type declarations: AMPEL converts the simple types (string/int/bool) when the policy types the value. |
+| fail-open opt-in (§4.1, Q6) | Per rule, `onMissingOwner: allow`; per repository, `unmatched: allow`. Both default to deny. With `allow`, claim still evaluates the policy when the local context suffices and only skips evaluation when it cannot (`ALLOWED_UNCHECKED`). |
+| output (§1) | A report (text or `--format json`) with one entry per owned path and per commit, including the AMPEL results. Exit codes 0 allowed, 1 denied, 2 error. No results attestation yet (§7.3). |
+
+### 7.2 Design points implemented
+
+- **Per-commit evaluation over the range (§2.2).** `pkg/repo` walks
+  `merge-base..head`, lists the paths each commit touches on its own (diff
+  against the parent; for merges, the intersection of the diffs against every
+  parent, so clean merges change nothing and conflict resolutions count), and
+  `pkg/claim` evaluates each owned path once per touching commit. A path passes
+  only when every commit passes. Policies and owner documents are loaded once
+  per path per run.
+- **Everything trusted is read from the base commit (§4.3).**
+  `.claim.yaml`, repository-local policies and owner pointer files come from
+  `--base`. `TestCheckRulesComeFromBase` rewrites all three in a PR and
+  checks none of it counts.
+- **Fail closed (§4.1).** No owner, unreachable or malformed document, digest
+  mismatch, invalid host, missing required context, unmatched files, shallow
+  files and policy errors all deny unless the configuration opts out.
+- **Context allowlist and clash rejection (§2.4).** The owner may only fill
+  context values the policy leaves open (no `value`, `default` or
+  `expression`); `ownerContext` narrows that list or lets the owner override
+  a default on purpose. Names that collide once lowercased, or that differ
+  only in case from an allowed name, make the document invalid. Keys the
+  policy does not take are dropped with a warning (not rejected) so one owner
+  document can serve policies with different context sets. Local providers
+  always win over the owner.
+- **SSRF and traversal defenses (§4.4, §4.5).** `https`/`git+https` only;
+  strict RFC 1123 host validation after IDNA to ASCII; IP literals, ports,
+  userinfo, `..`, local names refused; the dialer resolves the host and
+  refuses non-public addresses at connection time; no redirects; no proxy
+  from the environment; 1 MiB and 20 s caps; HTML-ish content types refused.
+  Pointer files are resolved relative to the owned path and may not escape
+  it. `--allow-private-owners` disables the network guard for local testing.
+- **Owner document pinning (§4.2, minimum).** `owner.digests` pins the
+  document to a sha256; a document matching none is treated as missing.
+- **Evidence collectors (§2.5).** The finding that `policylabs/collector`
+  could not read signatures or notes is out of date: v0.4.0 ships a
+  `gitsign` collector (synthesizes a `https://gitsign.sigstore.dev/predicate/git/v0.1`
+  attestation carrying the verified signer, with Rekor lookup) and `note`/`dnote`
+  collectors that fetch `refs/notes/commits` explicitly. claim loads
+  `gitsign:<repo>` and `dnote:<repo>` by default; notes remain transport only,
+  trust comes from the attestation signature AMPEL verifies (§4.6).
+- **Identity is the verified signer (§2.7).** The example policy reads
+  `verification.signers` and checks the sigstore identity and issuer against
+  the owner-supplied `signers` list.
+- **Head SHA binding (§4.7).** The report records base, merge base, head and
+  every commit evaluated.
+
+### 7.3 Not yet implemented
+
+- **Results store and PR status computation (§2.6).** Every run evaluates the
+  whole range. Keying results by `(commit, path, policy digest, owner document
+  digest)` and signing them as AMPEL results attestations is the next step; it
+  also brings the owner-document TTL.
+- **Signed owner documents (§4.2).** Trust rests on TLS (or the git host) plus
+  optional digest pinning. The document `version` field leaves room for a
+  signed envelope.
+- **navajo resolver (Q1).** The resolver boundary is `owner.Resolve` +
+  `owner.Fetcher.Fetch`; a new scheme plugs in there.
+- **Type validation of owner values (§2.4).** Beyond AMPEL's simple-type
+  conversion, nothing checks that a list is a list before evaluation.
+- **Co-authored commits (Q5).** Still open; the gitsign collector reports the
+  commit signer only.
+- **Changing a path's owner reference requires the current owner's
+  approval (§4.2).** Not enforced; it is an ordinary change to a base-branch
+  file today.

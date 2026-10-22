@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: Copyright 2026 The Policy Labs Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Example claim configuration for a registry-style repository: every
+# directory under data/ is named after the domain that owns it and the
+# domain decides who may sign changes to it.
+#
+# claim always reads this file from the merge target, never from the pull
+# request, so a change can never rewrite the rules it is judged by.
+version: 1
+
+# Files no rule matches are denied. Flip to "allow" only if the repository
+# has another gate (eg CODEOWNERS reviews) for everything else.
+unmatched: deny
+
+rules:
+  # data/<host>/... is owned by https://<host>/.well-known/claim.yaml
+  - name: domains
+    path: data/
+    policy: policies/signed-by-owner.json
+    owner:
+      scheme: host
+    # Only the "signers" value may come from the owner document; every other
+    # context value stays under the repository's control.
+    ownerContext: [signers]
+
+  # vendor/<name>/... is owned by whatever URL vendor/<name>/metadata.json
+  # declares at .maintainers.claim (as of the merge target).
+  - name: vendors
+    path: vendor/
+    policy: policies/signed-by-owner.json
+    owner:
+      scheme: file
+      file: metadata.json
+      pointer: /maintainers/claim
+    ownerContext: [signers]
+    # A vendor that publishes no owner document cannot be changed through
+    # this rule at all. This is the default, spelled out.
+    onMissingOwner: deny
+
+  # docs/ has no remote owner: the policy must be satisfiable locally. Here
+  # a remote policy pinned to a commit is used.
+  - name: docs
+    path: docs/
+    policy: git+https://github.com/carabiner-dev/policies@3df213a#gitsign/gitsign-commit-signature.hjson
+    owner:
+      scheme: none
